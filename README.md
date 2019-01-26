@@ -1,4 +1,6 @@
-# NIXOs user containers
+# NixOS user containers
+
+For a overview of this exercise, please see [my blog post][https://atpotts.uk/blog/posts/2019-01-26-namespaces-1.html].
 
 ## NB: This is a buggy and insecure experiment - use at your own risk
 

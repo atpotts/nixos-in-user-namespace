@@ -148,11 +148,14 @@ start () {
   # TODO: deal with race condition
   # TODO: generic readiness signalling
   export PID=$$
-  echo $PID >> .pid
+  echo $PID > .pid
+  echo $PID $uidrange $gidrange
 
   (while ! eval newuidmap $PID $uidrange; do
      sleep 0.01
    done && eval newgidmap $PID $gidrange) &
+  echo "eval newuidmap $PID $uidrangee"
+  echo "eval newgidmap $PID $gidrangee"
 
   # User Mount Process Namespace
   exec unshare -Up sh - <<'EOF'
@@ -169,43 +172,81 @@ start () {
     # we need to do some black magic to get sys mounting permissions
 
   # Cgroup s, net, ... everythin else -- needed for sys mounting permissions
-  exec unshare -Cmiun --mount-proc sh - <<'NETEOF'
+  exec unshare -Cmiun --mount-proc sh -c "exec unshare -C sh -" <<'NETEOF'
       set -e
       mkdir -p system/sys system/proc system/dev \
               system/tmp system/run
 
       mount -t sysfs  -o ro /sys system/sys || true
-      mount -t tmpfs tmpfs system/tmp
-      mount -t ramfs ramfs system/run
-      mount --rbind /proc system/proc
 
-      # set up dev
-      mount -t tmpfs tmpfs system/dev
-        touch system/dev/console system/dev/urandom system/dev/random\
-              system/dev/null system/dev/full system/dev/zero\
-              system/dev/tty system/dev/ptmx
+      # mount /sys/fs/cgroup if not already done
+      mount -t tmpfs -o uid=0,gid=0,mode=0755 cgroup system/sys/fs/cgroup
 
-        mkdir -p system/dev/pts
-        mount devpts system/dev/pts -t devpts
+      # (
+      #   cd system/sys/fs/cgroup
 
-        mount --bind /dev/stdout system/dev/console
-        mount --bind /dev/urandom system/dev/urandom
-        mount --bind /dev/random system/dev/random
-        mount --bind /dev/null system/dev/null
-        mount --bind /dev/full system/dev/full
-        mount --bind /dev/zero system/dev/zero
-        mount --bind /dev/tty system/dev/tty
-        mount --bind system/dev/pts/ptmx system/dev/ptmx
+      #   get/mount list of enabled cgroup controllers
+      #   for sys in $(awk '!/^#/ { if ($4 == 1) print $1 }' /proc/cgroups); do
+      #     mkdir $sys
+      #     if ! mountpoint -q $sys; then
+      #       if ! mount -n -t cgroup -o $sys cgroup $sys; then
+      #         rmdir $sys || true
+      #       fi
+      #     fi
+      #   done
+      # )
 
+
+      echo $(whoami)
+      mount -t tmpfs tmpfs ./system/tmp
+      mount -t ramfs ramfs ./system/run
+      mkdir -p ./system/run/wrappers
+      ls -la ./system/run/
+      mount --rbind /proc ./system/proc
+      # echo $$
+      # ls /proc
+      # exit 1
+
+      # set up dev DOESN'T LIKE BEING A TMPFS -- breaks permissions
+      # ramfs seems fine
+      # needs to be a real fs
+      # mount --bind /dev ./system/dev
+      # mount -t devtmpfs devtmpfs ./system/dev
+      mount_devs () {
+        mkdir -p ./system/dev
+        mount -t ramfs ramfs ./system/dev
+        for a in "$@"; do
+          echo mounting $a dev
+          touch "./system/dev/$a"
+          mount --bind "/dev/$a" "./system/dev/$a"
+        done
+      }
+      mount_devs console urandom random null full zero tty ptmx fuse
+      mkdir -p ./system/dev/pts
+      mount devpts ./system/dev/pts -t devpts
+      mount --bind /dev/stdout ./system/dev/console
+        # mount --bind /dev/urandom ./system/dev/urandom
+        # mount --bind /dev/random ./system/dev/random
+        # mount --bind /dev/null ./system/dev/null
+        # mount --bind /dev/full ./system/dev/full
+        # mount --bind /dev/zero ./system/dev/zero
+        # mount --bind /dev/tty ./system/dev/tty
+        # mount --bind /dev/fuse ./system/dev/fuse
+        mount --bind ./system/dev/pts/ptmx ./system/dev/ptmx
+        ls -la ./system/dev
       mkdir -p system/nix/store system/result
       mount --bind /nix/store system/nix/store
       mount --bind result system/result
 
-
       wait
       export container=nixos
 
-  exec chroot system result/init
+    # mkdir -p system/run/resolvconf/interfaces
+    # touch systemd run/resolvconf/interfaces/systemd
+    # exec systemd
+    # t=$(mktemp -p system)
+    # < result/init sed 
+    exec chroot system result/init
 
 NETEOF
 EOFFORK

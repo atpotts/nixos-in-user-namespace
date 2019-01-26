@@ -1,52 +1,51 @@
 {pkgs, lib, ...}:
 {
-  imports = [./bind-mounts.nix];
   config = {
-    system.build.earlyMountScript =
-      "${pkgs.writeText "hello.sh" "echo hello; echo hello > /dev/null"}";
-    # boot.specialFileSystems = lib.mkForce [];
-    boot.isContainer = true;
-    networking.hostName = "mycontainer";
-    networking.useDHCP = lib.mkForce false;
+    # some test services
     services.postgresql.enable = true;
     services.postgresql.superUser = "root";
     services.nginx.enable = true;
     services.sshd.enable = true;
-    services.resolved.enable = lib.mkForce false;
-    services.nscd.enable = lib.mkForce false;
 
-    # services.nscd.enable = false;
-    systemd.services.systemd-vconsole-setup.enable = false;
-    services.dhcpd4.enable = lib.mkForce false;
-    services.dhcpd6.enable = lib.mkForce false;
-    networking.firewall.enable = false;
+
+    boot.isContainer = true;
+    networking.hostName = "mycontainer";
+
 
     environment.systemPackages = with pkgs; [
       socat
       bashInteractive
-      netcat
       psmisc
-      stress
-      python
-      postgresql
-      kmod
     ];
 
-    security.sudo.enable = true;
     # Fancy stuff to enable wrappers to work
+    # We need a working nogroup (which isn't just a dump for host users)
     users.groups.nogroup.gid = lib.mkForce 999;
-    rootowns.sudo="${pkgs.sudo}";
+
+    security.sudo.enable = true;
+    # some bits of the store need te be owned by root
     system.activationScripts.enablesudo = ''
-      # some bits of the store need to be owned by root
       mkdir -p /wraps
       cp -r ${pkgs.sudo} /wraps/sudo
       chown -R root /wraps/sudo
       mount --bind /wraps/sudo ${pkgs.sudo}
-      echo "hellosudo"
-      echo "hellosudo" >/dev/null
     '';
+
+    # some things don't just make sense in this context
+    system.build.earlyMountScript =
+      "${pkgs.writeText "no-op.sh" "echo nothing > /dev/null"}";
     system.activationScripts.resolvconf = lib.mkForce "";
     system.activationScripts.specialfs = lib.mkForce "";
+
+    # disable a load of networking stuff (too many lines - not sure
+    # which ones we need)
+    networking.useDHCP = lib.mkForce false;
+    services.resolved.enable = lib.mkForce false;
+    services.nscd.enable = lib.mkForce false;
+    systemd.services.systemd-vconsole-setup.enable = false;
+    services.dhcpd4.enable = lib.mkForce false;
+    services.dhcpd6.enable = lib.mkForce false;
+    networking.firewall.enable = false;
   };
 
 }

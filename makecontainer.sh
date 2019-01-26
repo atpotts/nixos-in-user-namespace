@@ -144,16 +144,15 @@ start () {
   export uidrange=$(get_ranges $name uid)
   export gidrange=$(get_ranges $name gid)
 
-  # TODO: Workout how to shut this down
-  # TODO: deal with race condition
-  # TODO: generic readiness signalling
   export PID=$$
-  echo $PID > .pid
   echo $PID $uidrange $gidrange
 
+  dir=$(mktemp -d)
+  mkfifo $dir/fifo
+
+
   (while ! eval newuidmap $PID $uidrange; do
-     sleep 0.01
-   done && eval newgidmap $PID $gidrange) &
+   done && eval newgidmap $PID $gidrange && echo "" > $dir/fifo) &
   echo "eval newuidmap $PID $uidrangee"
   echo "eval newgidmap $PID $gidrangee"
 
@@ -164,38 +163,20 @@ start () {
     (sh - <<'EOFFORK'
     echo "waiting for permissions"
     set -e
-    while [ "$(id -u)" != "0" ] || [ "$(id -g)" != "0" ]; do
-        sleep 0.01s
-    done
+    read  < $dir/fifo
     echo "permissions gained"
     wait #clean up zombies
     # we need to do some black magic to get sys mounting permissions
 
-  # Cgroup s, net, ... everythin else -- needed for sys mounting permissions
-  exec unshare -Cmiun --mount-proc sh -c "exec unshare -C sh -" <<'NETEOF'
+    # Cgroup s, net, ... everythin else -- needed for sys mounting permissions
+    exec unshare -Cmiun --mount-proc sh - <<'NETEOF'
       set -e
       mkdir -p system/sys system/proc system/dev \
               system/tmp system/run
 
-      mount -t sysfs  -o ro /sys system/sys || true
+      mount -t sysfs  -o ro /sys system/sys
 
-      # mount /sys/fs/cgroup if not already done
       mount -t tmpfs -o uid=0,gid=0,mode=0755 cgroup system/sys/fs/cgroup
-
-      # (
-      #   cd system/sys/fs/cgroup
-
-      #   get/mount list of enabled cgroup controllers
-      #   for sys in $(awk '!/^#/ { if ($4 == 1) print $1 }' /proc/cgroups); do
-      #     mkdir $sys
-      #     if ! mountpoint -q $sys; then
-      #       if ! mount -n -t cgroup -o $sys cgroup $sys; then
-      #         rmdir $sys || true
-      #       fi
-      #     fi
-      #   done
-      # )
-
 
       echo $(whoami)
       mount -t tmpfs tmpfs ./system/tmp
@@ -203,15 +184,7 @@ start () {
       mkdir -p ./system/run/wrappers
       ls -la ./system/run/
       mount --rbind /proc ./system/proc
-      # echo $$
-      # ls /proc
-      # exit 1
 
-      # set up dev DOESN'T LIKE BEING A TMPFS -- breaks permissions
-      # ramfs seems fine
-      # needs to be a real fs
-      # mount --bind /dev ./system/dev
-      # mount -t devtmpfs devtmpfs ./system/dev
       mount_devs () {
         mkdir -p ./system/dev
         mount -t ramfs ramfs ./system/dev
@@ -225,13 +198,6 @@ start () {
       mkdir -p ./system/dev/pts
       mount devpts ./system/dev/pts -t devpts
       mount --bind /dev/stdout ./system/dev/console
-        # mount --bind /dev/urandom ./system/dev/urandom
-        # mount --bind /dev/random ./system/dev/random
-        # mount --bind /dev/null ./system/dev/null
-        # mount --bind /dev/full ./system/dev/full
-        # mount --bind /dev/zero ./system/dev/zero
-        # mount --bind /dev/tty ./system/dev/tty
-        # mount --bind /dev/fuse ./system/dev/fuse
         mount --bind ./system/dev/pts/ptmx ./system/dev/ptmx
         ls -la ./system/dev
       mkdir -p system/nix/store system/result
@@ -240,14 +206,7 @@ start () {
 
       wait
       export container=nixos
-
-    # mkdir -p system/run/resolvconf/interfaces
-    # touch systemd run/resolvconf/interfaces/systemd
-    # exec systemd
-    # t=$(mktemp -p system)
-    # < result/init sed 
-    exec chroot system result/init
-
+      exec chroot system result/init
 NETEOF
 EOFFORK
 ) &
